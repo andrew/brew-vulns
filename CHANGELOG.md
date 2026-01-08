@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-08
+
+- Fix severity extraction for OSS-Fuzz vulnerabilities by reading `ecosystem_specific.severity` from OSV data
+
 ## [0.2.0] - 2026-01-08
 
 - Add CycloneDX SBOM output with vulnerabilities (`--cyclonedx`)
