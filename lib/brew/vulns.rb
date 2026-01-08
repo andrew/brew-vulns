@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "sarif"
+require "sbom"
 
 require_relative "vulns/version"
 require_relative "vulns/osv_client"

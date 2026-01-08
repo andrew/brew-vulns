@@ -16,6 +16,7 @@ module Brew
         @include_deps = args.include?("--deps") || args.include?("-d")
         @json_output = args.include?("--json") || args.include?("-j")
         @sarif_output = args.include?("--sarif")
+        @cyclonedx_output = args.include?("--cyclonedx")
         @help = args.include?("--help") || args.include?("-h")
         @max_summary = parse_max_summary(args)
         @min_severity = parse_severity(args)
@@ -75,7 +76,7 @@ module Brew
         queryable = formulae.select(&:supported_forge?).select(&:tag)
         skipped = formulae.size - queryable.size
 
-        unless @json_output || @sarif_output
+        unless @json_output || @sarif_output || @cyclonedx_output
           puts "Checking #{queryable.size} packages for vulnerabilities..."
           puts "(#{skipped} packages skipped - no supported source URL)" if skipped > 0
           puts
@@ -134,7 +135,9 @@ module Brew
       end
 
       def output_results(results, all_formulae)
-        if @sarif_output
+        if @cyclonedx_output
+          output_cyclonedx(results, all_formulae)
+        elsif @sarif_output
           output_sarif(results)
         elsif @json_output
           output_json(results)
@@ -163,6 +166,39 @@ module Brew
         end
 
         puts JSON.pretty_generate(data)
+        results.empty? ? 0 : 1
+      end
+
+      def output_cyclonedx(results, all_formulae)
+        components = all_formulae.map do |formula|
+          {
+            type: "library",
+            name: formula.name,
+            version: formula.version,
+            purl: "pkg:brew/#{formula.name}@#{formula.version}"
+          }
+        end
+
+        vulnerabilities = []
+        results.each do |formula, vulns|
+          vulns.each do |vuln|
+            vulnerabilities << {
+              id: vuln.id,
+              source: { name: "OSV", url: "https://osv.dev" },
+              ratings: [{ severity: vuln.severity_display&.downcase }],
+              description: vuln.summary,
+              affects: [{ ref: "pkg:brew/#{formula.name}@#{formula.version}" }]
+            }
+          end
+        end
+
+        generator = Sbom::Cyclonedx::Generator.new(format: :json)
+        generator.generate("brew-vulns", {
+          packages: components,
+          vulnerabilities: vulnerabilities
+        })
+
+        puts generator.output
         results.empty? ? 0 : 1
       end
 
@@ -299,6 +335,7 @@ module Brew
             -b, --brewfile PATH  Scan packages from a Brewfile (default: ./Brewfile)
             -d, --deps           Include dependencies when checking a specific formula or Brewfile
             -j, --json           Output results as JSON
+            --cyclonedx          Output results as CycloneDX SBOM with vulnerabilities
             --sarif              Output results as SARIF for GitHub code scanning
             -m, --max-summary N  Truncate summaries to N characters (default: 60, 0 for no limit)
             -s, --severity LEVEL Only show vulnerabilities at or above LEVEL (low, medium, high, critical)
@@ -312,6 +349,7 @@ module Brew
             brew vulns -b ~/project/Brewfile  Scan a specific Brewfile
             brew vulns -b Brewfile --deps Scan Brewfile packages and their dependencies
             brew vulns --json             Output as JSON for CI/CD
+            brew vulns --cyclonedx        Output as CycloneDX SBOM
             brew vulns --sarif            Output as SARIF for GitHub Actions
             brew vulns --severity high    Only show HIGH and CRITICAL vulnerabilities
         HELP

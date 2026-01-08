@@ -572,4 +572,81 @@ class TestCLI < Minitest::Test
       Brew::Vulns::CLI.run(["--brewfile"])
     end
   end
+
+  def test_cyclonedx_output_format
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => "Test vulnerability",
+        "database_specific" => { "severity" => "HIGH" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--cyclonedx"]) }
+    end
+
+    sbom = JSON.parse(output)
+
+    assert_equal "CycloneDX", sbom["bomFormat"]
+    assert_equal "1.6", sbom["specVersion"]
+    assert sbom["components"].any? { |c| c["name"] == "vim" }
+    assert sbom["vulnerabilities"].any? { |v| v["id"] == "CVE-2024-1234" }
+  end
+
+  def test_cyclonedx_output_includes_vulnerability_details
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => "Buffer overflow vulnerability",
+        "database_specific" => { "severity" => "CRITICAL" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--cyclonedx"]) }
+    end
+
+    sbom = JSON.parse(output)
+    vuln = sbom["vulnerabilities"].first
+
+    assert_equal "CVE-2024-1234", vuln["id"]
+    assert_equal "OSV", vuln["source"]["name"]
+    assert_equal "critical", vuln["ratings"].first["severity"]
+    assert_equal "Buffer overflow vulnerability", vuln["description"]
+    assert_equal "pkg:brew/vim@9.1.0", vuln["affects"].first["ref"]
+  end
+
+  def test_cyclonedx_output_with_no_vulnerabilities
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: { results: [{ vulns: [] }] }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--cyclonedx"]) }
+    end
+
+    sbom = JSON.parse(output)
+
+    assert_equal "CycloneDX", sbom["bomFormat"]
+    assert sbom["components"].any? { |c| c["name"] == "vim" }
+    assert_empty sbom["vulnerabilities"] || []
+  end
 end

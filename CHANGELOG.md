@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- Add CycloneDX SBOM output with vulnerabilities (`--cyclonedx`)
+
 ## [0.2.0] - 2026-01-08
 
 - Add Brewfile scanning support (`--brewfile`) to check packages from a Brewfile

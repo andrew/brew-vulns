@@ -32,6 +32,7 @@ brew vulns [formula] [options]
 | `-b PATH` | `--brewfile PATH` | Scan packages from a Brewfile (default: ./Brewfile) |
 | `-d` | `--deps` | Include dependencies when checking a specific formula or Brewfile |
 | `-j` | `--json` | Output results as JSON |
+| | `--cyclonedx` | Output results as CycloneDX SBOM with vulnerabilities |
 | | `--sarif` | Output results as SARIF for GitHub code scanning |
 | `-m N` | `--max-summary N` | Truncate summaries to N characters (default: 60, 0 for no limit) |
 | `-s LEVEL` | `--severity LEVEL` | Only show vulnerabilities at or above LEVEL (low, medium, high, critical) |
@@ -69,6 +70,9 @@ brew vulns -m 0
 
 # Only show HIGH and CRITICAL vulnerabilities
 brew vulns --severity high
+
+# Output as CycloneDX SBOM with vulnerabilities
+brew vulns --cyclonedx > sbom.cdx.json
 
 # Output as SARIF for GitHub code scanning
 brew vulns --sarif > results.sarif
