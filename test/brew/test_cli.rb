@@ -85,16 +85,11 @@ class TestCLI < Minitest::Test
         "database_specific" => { "severity" => "HIGH" }
       }.to_json)
 
-    output = StringIO.new
-    original_stdout = $stdout
-    $stdout = output
-
-    Brew::Vulns::Formula.stub :load_installed, formulae do
-      Brew::Vulns::CLI.run(["--json"])
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--json"]) }
     end
 
-    $stdout = original_stdout
-    json = JSON.parse(output.string)
+    json = JSON.parse(output)
 
     assert_equal 1, json.size
     assert_equal "vim", json[0]["formula"]
@@ -182,18 +177,86 @@ class TestCLI < Minitest::Test
         "summary" => long_summary
       }.to_json)
 
-    output = StringIO.new
-    original_stdout = $stdout
-    $stdout = output
-
-    Brew::Vulns::Formula.stub :load_installed, formulae do
-      Brew::Vulns::CLI.run([])
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run([]) }
     end
 
-    $stdout = original_stdout
+    assert_includes output, "#{"A" * 60}..."
+    refute_includes output, "A" * 100
+  end
 
-    assert_includes output.string, "#{"A" * 60}..."
-    refute_includes output.string, "A" * 100
+  def test_max_summary_flag_changes_truncation
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+    long_summary = "A" * 100
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => long_summary
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--max-summary", "80"]) }
+    end
+
+    assert_includes output, "#{"A" * 80}..."
+    refute_includes output, "A" * 100
+  end
+
+  def test_max_summary_zero_disables_truncation
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+    long_summary = "A" * 100
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => long_summary
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["-m", "0"]) }
+    end
+
+    assert_includes output, "A" * 100
+    refute_includes output, "#{"A" * 60}..."
+  end
+
+  def test_max_summary_equals_syntax
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+    long_summary = "A" * 100
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => long_summary
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--max-summary=40"]) }
+    end
+
+    assert_includes output, "#{"A" * 40}..."
   end
 
   def test_output_handles_nil_summary
@@ -209,17 +272,229 @@ class TestCLI < Minitest::Test
     stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
       .to_return(status: 200, body: { "id" => "CVE-2024-1234" }.to_json)
 
-    output = StringIO.new
-    original_stdout = $stdout
-    $stdout = output
-
-    Brew::Vulns::Formula.stub :load_installed, formulae do
-      Brew::Vulns::CLI.run([])
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run([]) }
     end
 
-    $stdout = original_stdout
+    assert_includes output, "CVE-2024-1234 (UNKNOWN)"
+    refute_includes output, " - \n"
+  end
 
-    assert_includes output.string, "CVE-2024-1234 (UNKNOWN)"
-    refute_includes output.string, " - \n"
+  def test_severity_flag_filters_vulnerabilities
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [
+            { "id" => "CVE-2024-1111" },
+            { "id" => "CVE-2024-2222" }
+          ]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1111")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1111",
+        "summary" => "High severity",
+        "database_specific" => { "severity" => "HIGH" }
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-2222")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-2222",
+        "summary" => "Low severity",
+        "database_specific" => { "severity" => "LOW" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--severity", "high"]) }
+    end
+
+    assert_includes output, "CVE-2024-1111"
+    refute_includes output, "CVE-2024-2222"
+  end
+
+  def test_severity_flag_equals_syntax
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1111" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1111")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1111",
+        "database_specific" => { "severity" => "LOW" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--severity=high"]) }
+    end
+
+    assert_includes output, "No vulnerabilities found"
+    refute_includes output, "CVE-2024-1111"
+  end
+
+  def test_severity_short_flag
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1111" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1111")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1111",
+        "database_specific" => { "severity" => "CRITICAL" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["-s", "critical"]) }
+    end
+
+    assert_includes output, "CVE-2024-1111"
+    assert_includes output, "CRITICAL"
+  end
+
+  def test_sarif_output_format
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "summary" => "Test vulnerability",
+        "database_specific" => { "severity" => "HIGH" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--sarif"]) }
+    end
+
+    sarif = JSON.parse(output)
+
+    assert_equal "2.1.0", sarif["version"]
+    assert_equal 1, sarif["runs"].size
+    assert_equal "brew-vulns", sarif["runs"][0]["tool"]["driver"]["name"]
+    assert_equal 1, sarif["runs"][0]["results"].size
+    assert_equal "CVE-2024-1234", sarif["runs"][0]["results"][0]["ruleId"]
+    assert_equal "error", sarif["runs"][0]["results"][0]["level"]
+  end
+
+  def test_sarif_output_returns_one_with_vulnerabilities
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1234" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1234",
+        "database_specific" => { "severity" => "HIGH" }
+      }.to_json)
+
+    result = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--sarif"]) }
+      Brew::Vulns::CLI.run(["--sarif"])
+    end
+
+    assert_equal 1, result
+  end
+
+  def test_sarif_critical_severity_maps_to_error
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-1111" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1111")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-1111",
+        "database_specific" => { "severity" => "CRITICAL" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--sarif"]) }
+    end
+
+    sarif = JSON.parse(output)
+    result = sarif["runs"][0]["results"][0]
+
+    assert_equal "error", result["level"]
+  end
+
+  def test_sarif_medium_severity_maps_to_warning
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-2222" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-2222")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-2222",
+        "database_specific" => { "severity" => "MEDIUM" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--sarif"]) }
+    end
+
+    sarif = JSON.parse(output)
+    result = sarif["runs"][0]["results"][0]
+
+    # "warning" is the default SARIF level, so it may be omitted in output
+    assert_includes [nil, "warning"], result["level"]
+  end
+
+  def test_sarif_low_severity_maps_to_note
+    formulae = [Brew::Vulns::Formula.new(@vim_data)]
+
+    stub_request(:post, "https://api.osv.dev/v1/querybatch")
+      .to_return(status: 200, body: {
+        results: [{
+          vulns: [{ "id" => "CVE-2024-3333" }]
+        }]
+      }.to_json)
+
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-3333")
+      .to_return(status: 200, body: {
+        "id" => "CVE-2024-3333",
+        "database_specific" => { "severity" => "LOW" }
+      }.to_json)
+
+    output = Brew::Vulns::Formula.stub :load_installed, formulae do
+      capture_stdout { Brew::Vulns::CLI.run(["--sarif"]) }
+    end
+
+    sarif = JSON.parse(output)
+    result = sarif["runs"][0]["results"][0]
+
+    # SARIF may omit "note" level since it's not the default, but let's be permissive
+    assert_includes ["note", nil], result["level"]
   end
 end

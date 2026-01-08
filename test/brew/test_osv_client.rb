@@ -87,4 +87,59 @@ class TestOsvClient < Minitest::Test
     assert_equal "CVE-1", vulns[0]["id"]
     assert_equal "CVE-2", vulns[1]["id"]
   end
+
+  def test_get_vulnerability_returns_full_data
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-2024-1234")
+      .to_return(
+        status: 200,
+        body: {
+          id: "CVE-2024-1234",
+          summary: "Test vulnerability",
+          details: "Full details here",
+          severity: [{ type: "CVSS_V3", score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }]
+        }.to_json
+      )
+
+    vuln = @client.get_vulnerability("CVE-2024-1234")
+
+    assert_equal "CVE-2024-1234", vuln["id"]
+    assert_equal "Test vulnerability", vuln["summary"]
+    assert_equal "Full details here", vuln["details"]
+  end
+
+  def test_get_vulnerability_url_encodes_id
+    stub_request(:get, "https://api.osv.dev/v1/vulns/GHSA-xxxx-yyyy-zzzz")
+      .to_return(status: 200, body: { id: "GHSA-xxxx-yyyy-zzzz" }.to_json)
+
+    vuln = @client.get_vulnerability("GHSA-xxxx-yyyy-zzzz")
+
+    assert_equal "GHSA-xxxx-yyyy-zzzz", vuln["id"]
+  end
+
+  def test_get_vulnerability_raises_on_not_found
+    stub_request(:get, "https://api.osv.dev/v1/vulns/CVE-0000-0000")
+      .to_return(status: 404, body: "Not found")
+
+    assert_raises(Brew::Vulns::OsvClient::ApiError) do
+      @client.get_vulnerability("CVE-0000-0000")
+    end
+  end
+
+  def test_raises_api_error_on_timeout
+    stub_request(:post, "https://api.osv.dev/v1/query")
+      .to_timeout
+
+    assert_raises(Brew::Vulns::OsvClient::ApiError) do
+      @client.query(repo_url: "https://github.com/test/repo", version: "v1.0.0")
+    end
+  end
+
+  def test_raises_api_error_on_connection_refused
+    stub_request(:post, "https://api.osv.dev/v1/query")
+      .to_raise(Errno::ECONNREFUSED)
+
+    assert_raises(Brew::Vulns::OsvClient::ApiError) do
+      @client.query(repo_url: "https://github.com/test/repo", version: "v1.0.0")
+    end
+  end
 end

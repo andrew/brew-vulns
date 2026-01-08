@@ -58,7 +58,7 @@ module Brew
         formulae = data["formulae"].map { |f| new(f) }
 
         if formula_filter
-          formulae.select! { |f| f.name == formula_filter || f.name.start_with?("#{formula_filter}@") }
+          formulae.select! { |f| f.name == formula_filter || f.name.split("@").first == formula_filter }
         end
 
         formulae
@@ -73,7 +73,7 @@ module Brew
         formulae_by_name = all_formulae.each_with_object({}) { |f, h| h[f.name] = f }
 
         if formula_filter
-          filtered = all_formulae.select { |f| f.name == formula_filter || f.name.start_with?("#{formula_filter}@") }
+          filtered = all_formulae.select { |f| f.name == formula_filter || f.name.split("@").first == formula_filter }
           return [] if filtered.empty?
 
           deps_output, = Open3.capture2("brew", "deps", "--installed", formula_filter)

@@ -7,12 +7,43 @@ module Brew
         new(args).run
       end
 
+      DEFAULT_MAX_SUMMARY = 60
+      SEVERITY_LEVELS = { "low" => 1, "medium" => 2, "high" => 3, "critical" => 4 }.freeze
+
       def initialize(args)
         @args = args
         @formula_filter = args.first unless args.first&.start_with?("-")
         @include_deps = args.include?("--deps") || args.include?("-d")
         @json_output = args.include?("--json") || args.include?("-j")
+        @sarif_output = args.include?("--sarif")
         @help = args.include?("--help") || args.include?("-h")
+        @max_summary = parse_max_summary(args)
+        @min_severity = parse_severity(args)
+      end
+
+      def parse_max_summary(args)
+        args.each_with_index do |arg, idx|
+          if arg == "--max-summary" || arg == "-m"
+            value = args[idx + 1]
+            return value.to_i if value && !value.start_with?("-")
+          elsif arg.start_with?("--max-summary=")
+            return arg.split("=", 2).last.to_i
+          end
+        end
+        DEFAULT_MAX_SUMMARY
+      end
+
+      def parse_severity(args)
+        args.each_with_index do |arg, idx|
+          if arg == "--severity" || arg == "-s"
+            value = args[idx + 1]
+            return SEVERITY_LEVELS[value&.downcase] || 0 if value && !value.start_with?("-")
+          elsif arg.start_with?("--severity=")
+            value = arg.split("=", 2).last
+            return SEVERITY_LEVELS[value&.downcase] || 0
+          end
+        end
+        0
       end
 
       def run
@@ -30,7 +61,7 @@ module Brew
         queryable = formulae.select(&:supported_forge?).select(&:tag)
         skipped = formulae.size - queryable.size
 
-        unless @json_output
+        unless @json_output || @sarif_output
           puts "Checking #{queryable.size} packages for vulnerabilities..."
           puts "(#{skipped} packages skipped - no supported source URL)" if skipped > 0
           puts
@@ -70,11 +101,15 @@ module Brew
           batch_vulns = vuln_results[idx] || []
           next if batch_vulns.empty?
 
-          full_vulns = batch_vulns.map { |v| client.get_vulnerability(v["id"]) }
+          threads = batch_vulns.map do |v|
+            Thread.new { client.get_vulnerability(v["id"]) }
+          end
+          full_vulns = threads.map(&:value)
           vulns = Vulnerability.from_osv_list(full_vulns)
 
           version = formula.tag || formula.version
           vulns = vulns.select { |v| v.affects_version?(version) }
+          vulns = vulns.select { |v| v.severity_level >= @min_severity } if @min_severity > 0
 
           results[formula] = vulns if vulns.any?
         end
@@ -83,7 +118,9 @@ module Brew
       end
 
       def output_results(results, all_formulae)
-        if @json_output
+        if @sarif_output
+          output_sarif(results)
+        elsif @json_output
           output_json(results)
         else
           output_text(results, all_formulae)
@@ -113,6 +150,77 @@ module Brew
         results.empty? ? 0 : 1
       end
 
+      def output_sarif(results)
+        rules = []
+        sarif_results = []
+
+        results.each do |formula, vulns|
+          vulns.each do |vuln|
+            rule_id = vuln.id
+            rules << Sarif::ReportingDescriptor.new(
+              id: rule_id,
+              name: rule_id,
+              short_description: Sarif::MultiformatMessageString.new(
+                text: vuln.summary || "Security vulnerability"
+              ),
+              help_uri: vuln.advisory_url,
+              default_configuration: Sarif::ReportingConfiguration.new(
+                level: sarif_level(vuln.severity_display)
+              )
+            )
+
+            sarif_results << Sarif::Result.new(
+              rule_id: rule_id,
+              level: sarif_level(vuln.severity_display),
+              message: Sarif::Message.new(
+                text: "#{formula.name}@#{formula.version}: #{vuln.summary || vuln.id}"
+              ),
+              locations: [
+                Sarif::Location.new(
+                  physical_location: Sarif::PhysicalLocation.new(
+                    artifact_location: Sarif::ArtifactLocation.new(
+                      uri: formula.repo_url || formula.name
+                    )
+                  ),
+                  message: Sarif::Message.new(
+                    text: "Affected package: #{formula.name} version #{formula.version}"
+                  )
+                )
+              ]
+            )
+          end
+        end
+
+        log = Sarif::Log.new(
+          version: "2.1.0",
+          runs: [
+            Sarif::Run.new(
+              tool: Sarif::Tool.new(
+                driver: Sarif::ToolComponent.new(
+                  name: "brew-vulns",
+                  version: VERSION,
+                  information_uri: "https://github.com/andrew/brew-vulns",
+                  rules: rules.uniq { |r| r.id }
+                )
+              ),
+              results: sarif_results
+            )
+          ]
+        )
+
+        puts JSON.pretty_generate(log.to_h)
+        results.empty? ? 0 : 1
+      end
+
+      def sarif_level(severity)
+        case severity&.downcase
+        when "critical", "high" then "error"
+        when "medium" then "warning"
+        when "low" then "note"
+        else "warning"
+        end
+      end
+
       def output_text(results, all_formulae)
         if results.empty?
           puts "No vulnerabilities found."
@@ -130,7 +238,11 @@ module Brew
 
             line = "  #{vuln.id} (#{severity})"
             if vuln.summary
-              summary = vuln.summary.length > 60 ? "#{vuln.summary.slice(0, 60)}..." : vuln.summary
+              summary = if @max_summary > 0 && vuln.summary.length > @max_summary
+                "#{vuln.summary.slice(0, @max_summary)}..."
+              else
+                vuln.summary
+              end
               line = "#{line} - #{summary}"
             end
             puts line
@@ -165,18 +277,25 @@ module Brew
           Check installed Homebrew packages for known vulnerabilities via osv.dev.
 
           Arguments:
-            formula          Check only this formula (optional)
+            formula              Check only this formula (optional)
 
           Options:
-            -d, --deps       Include dependencies when checking a specific formula
-            -j, --json       Output results as JSON
-            -h, --help       Show this help message
+            -d, --deps           Include dependencies when checking a specific formula
+            -j, --json           Output results as JSON
+            --sarif              Output results as SARIF for GitHub code scanning
+            -m, --max-summary N  Truncate summaries to N characters (default: 60, 0 for no limit)
+            -s, --severity LEVEL Only show vulnerabilities at or above LEVEL (low, medium, high, critical)
+            -h, --help           Show this help message
 
           Examples:
             brew vulns                    Check all installed packages
             brew vulns openssl            Check only openssl
             brew vulns vim --deps         Check vim and its dependencies
             brew vulns --json             Output as JSON for CI/CD
+            brew vulns --sarif            Output as SARIF for GitHub Actions
+            brew vulns -m 100             Show longer summaries
+            brew vulns -m 0               Show full summaries
+            brew vulns --severity high    Only show HIGH and CRITICAL vulnerabilities
         HELP
       end
     end
