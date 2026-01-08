@@ -3,6 +3,8 @@
 require "test_helper"
 
 class TestFormula < Minitest::Test
+  include SilenceOutput
+
   def test_extracts_repo_url_from_github_archive_url
     data = {
       "name" => "act",

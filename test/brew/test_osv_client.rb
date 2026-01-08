@@ -3,7 +3,10 @@
 require "test_helper"
 
 class TestOsvClient < Minitest::Test
+  include SilenceOutput
+
   def setup
+    super
     @client = Brew::Vulns::OsvClient.new
   end
 

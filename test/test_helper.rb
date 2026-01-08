@@ -30,3 +30,19 @@ def capture_stderr
 ensure
   $stderr = original_stderr
 end
+
+module SilenceOutput
+  def setup
+    super
+    @original_stdout = $stdout
+    @original_stderr = $stderr
+    $stdout = StringIO.new
+    $stderr = StringIO.new
+  end
+
+  def teardown
+    $stdout = @original_stdout
+    $stderr = @original_stderr
+    super
+  end
+end

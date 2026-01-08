@@ -3,7 +3,10 @@
 require "test_helper"
 
 class TestCLI < Minitest::Test
+  include SilenceOutput
+
   def setup
+    super
     @vim_data = {
       "name" => "vim",
       "versions" => { "stable" => "9.1.0" },
