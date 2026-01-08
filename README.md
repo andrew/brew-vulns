@@ -144,6 +144,41 @@ jobs:
           sarif_file: results.sarif
 ```
 
+### Dependency graph integration
+
+Use the `--cyclonedx` flag to submit an SBOM to GitHub's dependency graph:
+
+```yaml
+name: SBOM Submission
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  sbom:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install brew-vulns
+        run: gem install brew-vulns
+
+      - name: Generate SBOM
+        run: brew vulns --cyclonedx > sbom.cdx.json
+        continue-on-error: true
+
+      - name: Submit to dependency graph
+        uses: evryfs/sbom-dependency-submission-action@v0
+        with:
+          sbom-files: sbom.cdx.json
+```
+
+This adds your Homebrew packages to the repository's dependency graph, enabling Dependabot alerts.
+
 ## Development
 
 ```bash
