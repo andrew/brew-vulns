@@ -181,7 +181,7 @@ This adds your Homebrew packages to the repository's dependency graph, enabling 
 ## Development
 
 ```bash
-git clone https://github.com/homebrew/brew-vulns
+git clone https://github.com/Homebrew/homebrew-brew-vulns
 cd brew-vulns
 bin/setup
 rake test
