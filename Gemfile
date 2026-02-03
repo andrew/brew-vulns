@@ -8,6 +8,7 @@ gemspec
 gem "irb"
 gem "rake", "~> 13.0"
 
-gem "minitest", "~> 5.16"
+gem "minitest", "~> 6.0"
+gem "minitest-mock"
 gem "simplecov", "~> 0.22", require: false
 gem "webmock", "~> 3.0"
