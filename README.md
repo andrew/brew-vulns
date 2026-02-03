@@ -7,8 +7,7 @@ A Homebrew subcommand that checks installed packages for known vulnerabilities u
 Via Homebrew:
 
 ```bash
-brew tap homebrew/brew-vulns https://github.com/homebrew/brew-vulns
-brew install brew-vulns
+brew install homebrew/vulns/brew-vulns
 ```
 
 Or via RubyGems:
