@@ -7,7 +7,7 @@ A Homebrew subcommand that checks installed packages for known vulnerabilities u
 Via Homebrew:
 
 ```bash
-brew tap andrew/brew-vulns https://github.com/andrew/brew-vulns
+brew tap homebrew/brew-vulns https://github.com/homebrew/brew-vulns
 brew install brew-vulns
 ```
 
@@ -182,7 +182,7 @@ This adds your Homebrew packages to the repository's dependency graph, enabling 
 ## Development
 
 ```bash
-git clone https://github.com/andrewnesbitt/brew-vulns
+git clone https://github.com/homebrew/brew-vulns
 cd brew-vulns
 bin/setup
 rake test
